@@ -1,11 +1,38 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
+function getRandomIndex(arrayLength) {
+    if (arrayLength <= 0) return -1; // Handle invalid input
+
+    const firstSegmentEnd = Math.floor(arrayLength / 6); // End of 1/6
+    const secondSegmentEnd = Math.floor(arrayLength / 6 + arrayLength / 3); // End of 1/6 + 1/3
+    const thirdSegmentEnd = arrayLength; // Remaining 1/2
+
+    // Randomly choose a segment with 1/3 probability each
+    const randomChoice = Math.random();
+
+    let randomIndex;
+
+    if (randomChoice < 1 / 3) {
+        // First 1/6 segment
+        randomIndex = Math.floor(Math.random() * (firstSegmentEnd + 1));
+    } else if (randomChoice < 2 / 3) {
+        // Next 1/3 segment
+        const start = firstSegmentEnd + 1;
+        randomIndex = start + Math.floor(Math.random() * (secondSegmentEnd - start + 1));
+    } else {
+        // Remaining 1/2 segment
+        const start = secondSegmentEnd + 1;
+        randomIndex = start + Math.floor(Math.random() * (thirdSegmentEnd - start));
+    }
+
+    return Math.min(randomIndex, arrayLength - 1); // Safeguard for edge cases
+}
+
 const AlbumShow = () => {
   const { albumId } = useParams();
   const [images, setImages] = useState([]);
   const [currentImage, setCurrentImage] = useState(null);
-  const [imageCache, setImageCache] = useState(new Set());
   const [latestId, setLatestId] = useState(null);
   const [nextPage, setNextPage] = useState(null);
 
@@ -38,17 +65,13 @@ const AlbumShow = () => {
           creationTime: new Date(media.mediaMetadata.creationTime),
         }));
 
-        setImages(prev => [...prev, ...imageList]);
+        // prepend new images to existing list
+        setImages(imageList.concat(images));
 
         // Preload first image if this is first page
         if (!nextPage && imageList.length > 0) {
-          preloadImage(imageList[0].url);
           setCurrentImage(imageList[0].url);
         }
-
-        // Preload remaining images
-        imageList.forEach((img) => preloadImage(img.url));
-
       } catch (error) {
         console.error("Error fetching images:", error);
       }
@@ -58,32 +81,21 @@ const AlbumShow = () => {
     fetchImages();
 
     // Set up polling interval
-    const pollInterval = setInterval(fetchImages, 30000);
+    const pollInterval = setInterval(fetchImages, 30 * 1000);
 
     // Cleanup
     return () => clearInterval(pollInterval);
   }, [albumId, latestId]);
 
-  // Preload an image and cache it
-  const preloadImage = (url) => {
-    if (!imageCache.has(url)) {
-      const img = new Image();
-      img.src = url;
-      setImageCache((prev) => new Set(prev).add(url));
-    }
-  };
-
   // Random image selector
   useEffect(() => {
-    if (images.length > 0) {
-      const interval = setInterval(() => {
-        const randomImage =
-          images[Math.floor(Math.random() * images.length)].url;
+    const interval = setInterval(() => {
+        if (images.length <= 1) return;
+        const randomImage = images[getRandomIndex(images.length)].url;
         setCurrentImage(randomImage);
-      }, 3000); // Change image every 3 seconds
+    }, 3000); // Change image every 3 seconds
 
-      return () => clearInterval(interval); // Cleanup on unmount
-    }
+    return () => clearInterval(interval); // Cleanup on unmount
   }, [images]);
 
   return (
