@@ -131,39 +131,64 @@ app.get('/', (req, res) => {
 
 /**
  * /albums
- * Lists any publicly accessible albums (shared albums) for the user.
- * If "Accept: application/json" is specified, returns JSON.
+ * Lists all publicly joinable albums for the user.
+ * If "Accept: text/html" is specified, returns html page that will then get json.
  */
 app.get('/albums', ensureAuthenticated, async (req, res) => {
   const accessToken = getAccessToken(req);
 
   try {
-    // Call the Google Photos API directly
-    // GET https://photoslibrary.googleapis.com/v1/albums?pageSize=50
-    const albumsUrl = 'https://photoslibrary.googleapis.com/v1/albums?pageSize=50';
-    const apiResponse = await fetch(albumsUrl, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      }
-    });
-
-    if (!apiResponse.ok) {
-      const body = await apiResponse.text();
-      console.error('Failed to list albums:', body);
-      return res.status(500).send('Error fetching albums.');
+    // immediately return HTML if requested
+    if (req.headers['accept']?.includes('text/html')) {
+      return res.sendFile(path.join(__dirname, 'views', 'albums.html'));
     }
 
-    const data = await apiResponse.json();
-    const albums = data.albums || [];
+    // Fetch all albums and shared albums
+    const seenAlbumIds = new Set();
+    let allAlbums = [];
 
-    // If request wants JSON, return JSON
-    if (req.headers['accept'] && req.headers['accept'].includes('application/json')) {
-      return res.json(albums);
+    // Helper function to fetch paginated results
+    async function fetchAlbumPages(url, isSharedEndpoint = false) {
+      let nextPageToken = null;
+      do {
+        const params = new URLSearchParams({
+          pageSize: '50',
+          ...(nextPageToken && { pageToken: nextPageToken })
+        });
+        
+        const apiResponse = await fetch(`${url}?${params}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        });
+
+        if (!apiResponse.ok) {
+          throw new Error(`Failed to fetch albums: ${await apiResponse.text()}`);
+        }
+
+        const data = await apiResponse.json();
+        const albums = isSharedEndpoint ? (data.sharedAlbums || []) : (data.albums || []);
+        
+        // Filter and deduplicate albums
+        albums.forEach(album => {
+          if (!seenAlbumIds.has(album.id)) {
+            seenAlbumIds.add(album.id);
+            allAlbums.push(album);
+          }
+        });
+        
+        nextPageToken = data.nextPageToken;
+      } while (nextPageToken);
     }
 
-    // Otherwise, serve a static HTML page that fetches JSON dynamically (albums.html)
-    res.sendFile(path.join(__dirname, 'views', 'albums.html'));
+    // Fetch both own and shared albums in parallel
+    await Promise.all([
+      fetchAlbumPages('https://photoslibrary.googleapis.com/v1/albums'),
+      fetchAlbumPages('https://photoslibrary.googleapis.com/v1/sharedAlbums', true)
+    ]);
+
+    res.json(allAlbums);
   } catch (err) {
     console.error('Error listing albums:', err);
     res.status(500).send('Failed to list albums.');
@@ -173,10 +198,14 @@ app.get('/albums', ensureAuthenticated, async (req, res) => {
 /**
  * /albums/:albumId
  * Shows pictures in a particular album.
- * If "Accept: application/json" is specified, returns JSON.
+ * If "Accept: text/html" is specified, returns HTML page that will then get json.
+ * Optional query param: latestId - fetches until this media item is found
+ * Optional query param: nextPage - fetches next page of results
  */
 app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
   const albumId = req.params.albumId;
+  const latestId = req.query.latestId;
+  const nextPage = req.query.nextPage;
   const accessToken = getAccessToken(req);
 
   if (!albumId) {
@@ -184,8 +213,10 @@ app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
   }
 
   try {
-    // POST https://photoslibrary.googleapis.com/v1/mediaItems:search
-    //  { albumId: <albumId> }
+    if (req.headers['accept']?.includes('text/html')) {
+      return res.sendFile(path.join(__dirname, 'views', 'album.html'));
+    }
+
     const searchUrl = 'https://photoslibrary.googleapis.com/v1/mediaItems:search';
     const searchResponse = await fetch(searchUrl, {
       method: 'POST',
@@ -195,7 +226,8 @@ app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
       },
       body: JSON.stringify({
         albumId: albumId,
-        pageSize: 50
+        pageSize: 50,
+        ...(nextPage && { pageToken: nextPage })
       }),
     });
 
@@ -206,15 +238,17 @@ app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
     }
 
     const data = await searchResponse.json();
-    const mediaItems = data.mediaItems || [];
 
-    // If request wants JSON, return JSON
-    if (req.headers['accept'] && req.headers['accept'].includes('application/json')) {
-      return res.json(mediaItems);
+    // If latestId specified and found, trim response
+    if (latestId && data.mediaItems) {
+      const latestIndex = data.mediaItems.findIndex(item => item.id === latestId);
+      if (latestIndex !== -1) {
+        data.mediaItems = data.mediaItems.slice(0, latestIndex);
+        delete data.nextPageToken;
+      }
     }
 
-    // Otherwise, serve album.html (which fetches JSON on the client side)
-    res.sendFile(path.join(__dirname, 'views', 'album.html'));
+    res.json(data);
   } catch (err) {
     console.error('Error fetching album items:', err);
     res.status(500).send('Failed to list album items.');

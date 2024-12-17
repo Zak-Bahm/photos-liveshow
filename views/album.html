@@ -5,30 +5,82 @@
   <title>Google Photos App - Album Details</title>
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
-      try {
-        // Extract the albumId from the current URL path: /albums/<albumId>
-        const pathParts = window.location.pathname.split('/');
-        const albumId = pathParts[pathParts.length - 1]; // last part is the albumId
+      const container = document.getElementById('album-container');
+      let latestId = null;
+      let pollInterval = null;
 
-        const response = await fetch(`/albums/${albumId}`, {
+      // Extract albumId from URL
+      const pathParts = window.location.pathname.split('/');
+      const albumId = pathParts[pathParts.length - 1];
+
+      // Fetch all pages of media items
+      async function fetchAllMediaItems() {
+        let allItems = [];
+        let nextPageToken = null;
+
+        do {
+          const response = await fetch(`/albums/${albumId}${nextPageToken ? `?nextPage=${nextPageToken}` : ''}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (!response.ok) throw new Error(`Server returned ${response.status}`);
+          
+          const data = await response.json();
+          if (data.mediaItems?.length) {
+            allItems.push(...data.mediaItems);
+          }
+          nextPageToken = data.nextPageToken;
+        } while (nextPageToken);
+
+        return allItems;
+      }
+
+      // Check for new items
+      async function checkNewItems() {
+        if (!latestId) return;
+        
+        const response = await fetch(`/albums/${albumId}?latestId=${latestId}`, {
           headers: { 'Accept': 'application/json' }
         });
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}`);
+        
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        
+        const data = await response.json();
+        if (data.mediaItems?.length) {
+          const newItems = data.mediaItems;
+          if (newItems.length > 0) {
+            latestId = newItems[0].id;
+            prependNewItems(newItems);
+          }
         }
+      }
 
-        const mediaItems = await response.json();
-        const container = document.getElementById('album-container');
+      // Add new items to DOM
+      function prependNewItems(items) {
+        const newHtml = items.map(item => `
+          <li>
+            <img src="${item.baseUrl}" alt="${item.filename}" width="200">
+            <p>${item.filename}</p>
+          </li>
+        `).join('');
+        
+        const ul = container.querySelector('ul');
+        ul.insertAdjacentHTML('afterbegin', newHtml);
+      }
 
-        if (mediaItems.length === 0) {
+      // Initial load
+      try {
+        const items = await fetchAllMediaItems();
+        
+        if (items.length === 0) {
           container.innerHTML = '<p>No photos found in this album.</p>';
           return;
         }
 
-        let html = `<h2>Photos in Album: ${albumId}</h2><ul>`;
-        mediaItems.forEach(item => {
-          // Each item has a baseUrl property
-          // For images, we can embed them in an <img> element
+        latestId = items[0]?.id;
+        
+        let html = '<h2>Photos in Album</h2><ul>';
+        items.forEach(item => {
           html += `
             <li>
               <img src="${item.baseUrl}" alt="${item.filename}" width="200">
@@ -36,12 +88,20 @@
             </li>`;
         });
         html += '</ul>';
-
+        
         container.innerHTML = html;
+
+        // Start polling for new items
+        pollInterval = setInterval(checkNewItems, 30000);
       } catch (err) {
-        console.error('Error fetching album items:', err);
-        document.getElementById('album-container').innerHTML = `<p>Error: ${err.message}</p>`;
+        console.error('Error:', err);
+        container.innerHTML = `<p>Error: ${err.message}</p>`;
       }
+
+      // Cleanup
+      window.addEventListener('unload', () => {
+        if (pollInterval) clearInterval(pollInterval);
+      });
     });
   </script>
 </head>
