@@ -1,8 +1,12 @@
-require('dotenv').config();
-const express = require('express');
-const session = require('express-session');
-const path = require('path');
-const fetch = require('node-fetch');
+import express, { urlencoded, json } from 'express';
+import session from 'express-session';
+import fetch from 'node-fetch';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import 'dotenv/config';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,8 +22,8 @@ app.use(session({
 }));
 
 // --- Parse URL-encoded and JSON bodies ---
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(urlencoded({ extended: true }));
+app.use(json());
 
 /**
  * Helper: Return the user's access token from the session.
@@ -114,33 +118,17 @@ app.get('/auth/google/callback', async (req, res) => {
  */
 
 /**
- * Home page:
- * - If no user session token, shows index.html with a link to /auth/google/login
- * - If user is authenticated, redirect to /albums
- */
-app.get('/', (req, res) => {
-  const token = getAccessToken(req);
-  if (!token) {
-    // Not logged in -> serve index.html
-    return res.sendFile(path.join(__dirname, 'views', 'index.html'));
-  } else {
-    // If logged in, redirect to /albums
-    return res.redirect('/albums');
-  }
-});
-
-/**
- * /albums
+ * /api/albums
  * Lists all publicly joinable albums for the user.
  * If "Accept: text/html" is specified, returns html page that will then get json.
  */
-app.get('/albums', ensureAuthenticated, async (req, res) => {
+app.get('/api/albums', ensureAuthenticated, async (req, res) => {
   const accessToken = getAccessToken(req);
 
   try {
     // immediately return HTML if requested
     if (req.headers['accept']?.includes('text/html')) {
-      return res.sendFile(path.join(__dirname, 'views', 'albums.html'));
+      return res.sendFile(join(__dirname, 'views', 'albums.html'));
     }
 
     // Fetch all albums and shared albums
@@ -196,13 +184,13 @@ app.get('/albums', ensureAuthenticated, async (req, res) => {
 });
 
 /**
- * /albums/:albumId
+ * /api/albums/:albumId
  * Shows pictures in a particular album.
  * If "Accept: text/html" is specified, returns HTML page that will then get json.
  * Optional query param: latestId - fetches until this media item is found
  * Optional query param: nextPage - fetches next page of results
  */
-app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
+app.get('/api/albums/:albumId', ensureAuthenticated, async (req, res) => {
   const albumId = req.params.albumId;
   const latestId = req.query.latestId;
   const nextPage = req.query.nextPage;
@@ -214,7 +202,7 @@ app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
 
   try {
     if (req.headers['accept']?.includes('text/html')) {
-      return res.sendFile(path.join(__dirname, 'views', 'album.html'));
+      return res.sendFile(join(__dirname, 'views', 'album.html'));
     }
 
     const searchUrl = 'https://photoslibrary.googleapis.com/v1/mediaItems:search';
@@ -253,6 +241,38 @@ app.get('/albums/:albumId', ensureAuthenticated, async (req, res) => {
     console.error('Error fetching album items:', err);
     res.status(500).send('Failed to list album items.');
   }
+});
+
+/**
+ * Api page:
+ * - If no user session token, shows index.html with a link to /auth/google/login
+ * - If user is authenticated, redirect to /albums
+ */
+app.get('/api', (req, res) => {
+    const token = getAccessToken(req);
+    if (!token) {
+      // Not logged in -> serve index.html
+      return res.sendFile(join(__dirname, 'views', 'index.html'));
+    } else {
+      // If logged in, redirect to /albums
+      return res.redirect('/albums');
+    }
+  });
+
+/* -----------------------------------------------------------------------------
+ *  REACT APP SERVING
+ * -----------------------------------------------------------------------------
+ */
+
+// Serve static files from the React build directory
+app.use('/static', express.static(join(__dirname, 'build/static')));
+
+// Catch-all route for React app (excluding /api and /auth)
+app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/auth')) {
+        return next();
+    }
+    res.sendFile(join(__dirname, 'build', 'index.html'));
 });
 
 /* -----------------------------------------------------------------------------
