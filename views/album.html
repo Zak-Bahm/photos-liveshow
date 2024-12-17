@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Google Photos App - Album Details</title>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        // Extract the albumId from the current URL path: /albums/<albumId>
+        const pathParts = window.location.pathname.split('/');
+        const albumId = pathParts[pathParts.length - 1]; // last part is the albumId
+
+        const response = await fetch(`/albums/${albumId}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+
+        const mediaItems = await response.json();
+        const container = document.getElementById('album-container');
+
+        if (mediaItems.length === 0) {
+          container.innerHTML = '<p>No photos found in this album.</p>';
+          return;
+        }
+
+        let html = `<h2>Photos in Album: ${albumId}</h2><ul>`;
+        mediaItems.forEach(item => {
+          // Each item has a baseUrl property
+          // For images, we can embed them in an <img> element
+          html += `
+            <li>
+              <img src="${item.baseUrl}" alt="${item.filename}" width="200">
+              <p>${item.filename}</p>
+            </li>`;
+        });
+        html += '</ul>';
+
+        container.innerHTML = html;
+      } catch (err) {
+        console.error('Error fetching album items:', err);
+        document.getElementById('album-container').innerHTML = `<p>Error: ${err.message}</p>`;
+      }
+    });
+  </script>
+</head>
+<body>
+  <h1>Album Details</h1>
+  <div id="album-container">
+    <p>Loading photos...</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Google Photos App - Albums</title>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        // Fetch albums in JSON form
+        const response = await fetch('/albums', {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}`);
+        }
+
+        const albums = await response.json();
+
+        const container = document.getElementById('albums-container');
+        if (albums.length === 0) {
+          container.innerHTML = '<p>No albums found. Make sure they are publicly accessible or shared.</p>';
+          return;
+        }
+
+        // Build a simple list of albums
+        let html = '<ul>';
+        albums.forEach(album => {
+          // Link to /albums/<album.id> which will serve `album.html`
+          html += `<li><a href="/albums/${album.id}">${album.title}</a></li>`;
+        });
+        html += '</ul>';
+
+        container.innerHTML = html;
+
+      } catch (err) {
+        console.error('Error fetching albums:', err);
+        document.getElementById('albums-container').innerHTML = `<p>Error: ${err.message}</p>`;
+      }
+    });
+  </script>
+</head>
+<body>
+  <h1>Your Shared Google Photos Albums</h1>
+  <div id="albums-container">
+    <p>Loading albums...</p>
+  </div>
+</body>
+</html>
