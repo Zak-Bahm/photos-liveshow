@@ -32,6 +32,47 @@ function getAccessToken(req) {
   return req.session ? req.session.access_token : null;
 }
 
+function getTokenExpiration(req) {
+  return req.session ? req.session.token_expiration : null;
+}
+
+function getRefreshToken(req) {
+  return req.session ? req.session.refresh_token : null;
+}
+
+function isTokenExpired(req) {
+  const expiration = getTokenExpiration(req);
+  if (!expiration) return true;
+  // Add 1 minute buffer before expiration
+  return Date.now() >= (expiration - 60000);
+}
+
+async function refreshAccessToken(refreshToken) {
+  const tokenUrl = 'https://oauth2.googleapis.com/token';
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token'
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params
+  });
+
+  if (!response.ok) {
+    throw new Error('Token refresh failed');
+  }
+
+  const data = await response.json();
+  return {
+    access_token: data.access_token,
+    expires_in: data.expires_in
+  };
+}
+
 /**
  * Middleware: Ensure user is authenticated (has an access token)
  */
@@ -41,6 +82,29 @@ function ensureAuthenticated(req, res, next) {
     return res.redirect('/');
   }
   next();
+}
+
+async function refreshTokenIfNeeded(req, res, next) {
+  if (!getAccessToken(req) || !isTokenExpired(req)) {
+    return next();
+  }
+
+  const refreshToken = getRefreshToken(req);
+  if (!refreshToken) {
+    req.session.destroy();
+    return res.redirect('/');
+  }
+
+  try {
+    const { access_token, expires_in } = await refreshAccessToken(refreshToken);
+    req.session.access_token = access_token;
+    req.session.token_expiration = Date.now() + (expires_in * 1000);
+    next();
+  } catch (err) {
+    console.error('Token refresh failed:', err);
+    req.session.destroy();
+    res.redirect('/');
+  }
 }
 
 /* -----------------------------------------------------------------------------
@@ -103,7 +167,8 @@ app.get('/auth/google/callback', async (req, res) => {
     const tokens = await tokenResponse.json();
     // Store the access_token in session
     req.session.access_token = tokens.access_token;
-    // If needed, also store tokens.refresh_token
+    req.session.refresh_token = tokens.refresh_token;
+    req.session.token_expiration = Date.now() + (tokens.expires_in * 1000);
 
     return res.redirect('/albums');
   } catch (err) {
@@ -122,7 +187,7 @@ app.get('/auth/google/callback', async (req, res) => {
  * Lists all publicly joinable albums for the user.
  * If "Accept: text/html" is specified, returns html page that will then get json.
  */
-app.get('/api/albums', ensureAuthenticated, async (req, res) => {
+app.get('/api/albums', ensureAuthenticated, refreshTokenIfNeeded, async (req, res) => {
   const accessToken = getAccessToken(req);
 
   try {
@@ -190,7 +255,7 @@ app.get('/api/albums', ensureAuthenticated, async (req, res) => {
  * Optional query param: latestId - fetches until this media item is found
  * Optional query param: nextPage - fetches next page of results
  */
-app.get('/api/albums/:albumId', ensureAuthenticated, async (req, res) => {
+app.get('/api/albums/:albumId', ensureAuthenticated, refreshTokenIfNeeded, async (req, res) => {
   const albumId = req.params.albumId;
   const latestId = req.query.latestId;
   const nextPage = req.query.nextPage;
