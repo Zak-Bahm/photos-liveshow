@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, useParams } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import Login from './components/Login.js';
 import AlbumSelect from './components/AlbumSelect.js';
 import AlbumShow from './components/AlbumShow.js';
