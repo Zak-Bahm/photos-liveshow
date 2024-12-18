@@ -1,0 +1,16 @@
+[Unit]
+Description=Photos Liveshow Express Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/zak/photos-liveshow
+ExecStart=/usr/local/bin/node server.js
+Restart=on-failure
+Environment=NODE_ENV=production
+EnvironmentFile=/home/zak/photos-liveshow/.env
+User=zak
+Group=zak
+
+[Install]
+WantedBy=multi-user.target
